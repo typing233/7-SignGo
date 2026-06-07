@@ -84,7 +84,7 @@ router.put('/:id/fields', (req: AuthRequest, res) => {
   res.json({ fields: savedFields });
 });
 
-router.post('/:id/send', (req: AuthRequest, res) => {
+router.post('/:id/send', async (req: AuthRequest, res) => {
   const process = getOne('SELECT * FROM signing_processes WHERE id = ? AND creator_id = ?', [Number(req.params.id), req.userId!]);
   if (!process) {
     return res.status(404).json({ error: '签署流程不存在' });

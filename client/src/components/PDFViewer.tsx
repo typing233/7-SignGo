@@ -1,10 +1,13 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.js',
+  import.meta.url
+).toString();
 
 interface PDFViewerProps {
   url: string;
@@ -12,6 +15,7 @@ interface PDFViewerProps {
   onPageChange?: (page: number) => void;
   onLoadSuccess?: (numPages: number) => void;
   width?: number;
+  overlayRef?: React.RefObject<HTMLDivElement | null>;
   renderOverlay?: (pageWidth: number, pageHeight: number) => React.ReactNode;
 }
 
@@ -21,6 +25,7 @@ export default function PDFViewer({
   onPageChange,
   onLoadSuccess,
   width = 600,
+  overlayRef,
   renderOverlay,
 }: PDFViewerProps) {
   const [numPages, setNumPages] = useState(0);
@@ -42,7 +47,7 @@ export default function PDFViewer({
 
   return (
     <div className="flex flex-col items-center">
-      <div className="relative border border-gray-200 shadow-sm">
+      <div className="relative border border-gray-200 shadow-sm inline-block">
         <Document file={url} onLoadSuccess={handleLoadSuccess} loading={<div className="p-12 text-gray-400">加载PDF中...</div>}>
           <Page
             pageNumber={currentPage}
@@ -54,6 +59,7 @@ export default function PDFViewer({
         </Document>
         {renderOverlay && pageDimensions.width > 0 && (
           <div
+            ref={overlayRef}
             className="absolute top-0 left-0"
             style={{ width: pageDimensions.width, height: pageDimensions.height }}
           >

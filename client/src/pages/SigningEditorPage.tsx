@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { DndContext, DragEndEvent, DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, useDraggable, useDroppable, DragOverlay, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
 import { PenTool, Calendar, Type, Trash2, Send } from 'lucide-react';
 import api from '../api';
 import PDFViewer from '../components/PDFViewer';
@@ -53,22 +53,24 @@ function DraggablePaletteItem({ type, label, icon: Icon }: { type: string; label
 
 function PlacedField({
   field,
-  pageWidth,
-  pageHeight,
+  index,
   signerColor,
   signerName,
   onDelete,
+  onMove,
+  overlayRect,
 }: {
   field: FieldData;
-  pageWidth: number;
-  pageHeight: number;
+  index: number;
   signerColor: string;
   signerName: string;
   onDelete: () => void;
+  onMove: (deltaXPct: number, deltaYPct: number) => void;
+  overlayRect: DOMRect | null;
 }) {
   const { attributes, listeners, setNodeRef, isDragging, transform } = useDraggable({
-    id: `field-${field.id || Math.random()}`,
-    data: { field, fromPalette: false },
+    id: `field-${index}`,
+    data: { fieldIndex: index, fromPalette: false },
   });
 
   const style: React.CSSProperties = {
@@ -115,6 +117,8 @@ function DroppableCanvas({
   pageHeight,
   signers,
   onDeleteField,
+  onMoveField,
+  overlayRect,
 }: {
   fields: FieldData[];
   currentPage: number;
@@ -122,27 +126,30 @@ function DroppableCanvas({
   pageHeight: number;
   signers: Signer[];
   onDeleteField: (index: number) => void;
+  onMoveField: (index: number, deltaXPct: number, deltaYPct: number) => void;
+  overlayRect: DOMRect | null;
 }) {
   const { setNodeRef } = useDroppable({ id: 'pdf-canvas' });
-  const pageFields = fields.filter((f) => f.page === currentPage);
 
   return (
     <div ref={setNodeRef} className="absolute inset-0" style={{ zIndex: 10 }}>
-      {pageFields.map((field, _) => {
-        const globalIndex = fields.indexOf(field);
+      {fields.map((field, idx) => {
+        if (field.page !== currentPage) return null;
         const signerIndex = signers.findIndex((s) => s.id === field.signer_id);
         const color = SIGNER_COLORS[signerIndex % SIGNER_COLORS.length];
         const signerName = signers[signerIndex]?.name || '?';
+        const globalIndex = fields.indexOf(field);
 
         return (
           <PlacedField
-            key={globalIndex}
+            key={`${globalIndex}-${field.x}-${field.y}`}
             field={field}
-            pageWidth={pageWidth}
-            pageHeight={pageHeight}
+            index={globalIndex}
             signerColor={color}
             signerName={signerName}
             onDelete={() => onDeleteField(globalIndex)}
+            onMove={(dx, dy) => onMoveField(globalIndex, dx, dy)}
+            overlayRect={overlayRect}
           />
         );
       })}
@@ -161,8 +168,11 @@ export default function SigningEditorPage() {
   const [numPages, setNumPages] = useState(1);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const [canvasDimensions, setCanvasDimensions] = useState({ width: 600, height: 800 });
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
 
   useEffect(() => {
     api.get(`/signing/${id}`).then((res) => {
@@ -179,20 +189,26 @@ export default function SigningEditorPage() {
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!over || over.id !== 'pdf-canvas') return;
-    if (!canvasRef.current) return;
-
     const data = active.data.current;
 
+    if (!overlayRef.current) return;
+    const rect = overlayRef.current.getBoundingClientRect();
+
     if (data?.fromPalette) {
-      const canvasRect = canvasRef.current.getBoundingClientRect();
+      // For palette items: compute final pointer position relative to the overlay
+      const activatorEvent = event.activatorEvent as PointerEvent;
+      const finalX = activatorEvent.clientX + event.delta.x;
+      const finalY = activatorEvent.clientY + event.delta.y;
+
+      const dropXPct = ((finalX - rect.left) / rect.width) * 100;
+      const dropYPct = ((finalY - rect.top) / rect.height) * 100;
+
+      // Only place if drop is within the PDF area
+      if (dropXPct < 0 || dropXPct > 100 || dropYPct < 0 || dropYPct > 100) return;
+
       const fieldType = FIELD_TYPES.find((t) => t.type === data.type)!;
-
-      const dropX = ((event as any).activatorEvent.clientX + (event.delta?.x || 0) - canvasRect.left) / canvasRect.width * 100;
-      const dropY = ((event as any).activatorEvent.clientY + (event.delta?.y || 0) - canvasRect.top) / canvasRect.height * 100;
-
-      const x = Math.max(0, Math.min(100 - fieldType.width, dropX - fieldType.width / 2));
-      const y = Math.max(0, Math.min(100 - fieldType.height, dropY - fieldType.height / 2));
+      const x = Math.max(0, Math.min(100 - fieldType.width, dropXPct - fieldType.width / 2));
+      const y = Math.max(0, Math.min(100 - fieldType.height, dropYPct - fieldType.height / 2));
 
       const newField: FieldData = {
         signer_id: signers[selectedSigner]?.id,
@@ -205,26 +221,36 @@ export default function SigningEditorPage() {
         required: true,
       };
       setFields([...fields, newField]);
-    } else if (data?.field) {
-      const canvasRect = canvasRef.current.getBoundingClientRect();
-      const deltaXPercent = (event.delta.x / canvasRect.width) * 100;
-      const deltaYPercent = (event.delta.y / canvasRect.height) * 100;
+    } else if (data && !data.fromPalette && data.fieldIndex !== undefined) {
+      // Moving an existing field: convert pixel delta to percentage of overlay
+      const deltaXPct = (event.delta.x / rect.width) * 100;
+      const deltaYPct = (event.delta.y / rect.height) * 100;
 
-      const fieldIndex = fields.indexOf(data.field);
-      if (fieldIndex >= 0) {
-        const updated = [...fields];
-        updated[fieldIndex] = {
-          ...updated[fieldIndex],
-          x: Math.max(0, Math.min(100 - updated[fieldIndex].width, updated[fieldIndex].x + deltaXPercent)),
-          y: Math.max(0, Math.min(100 - updated[fieldIndex].height, updated[fieldIndex].y + deltaYPercent)),
-        };
-        setFields(updated);
-      }
+      const fieldIndex = data.fieldIndex as number;
+      const updated = [...fields];
+      const field = updated[fieldIndex];
+      updated[fieldIndex] = {
+        ...field,
+        x: Math.max(0, Math.min(100 - field.width, field.x + deltaXPct)),
+        y: Math.max(0, Math.min(100 - field.height, field.y + deltaYPct)),
+      };
+      setFields(updated);
     }
   };
 
   const handleDeleteField = (index: number) => {
     setFields(fields.filter((_, i) => i !== index));
+  };
+
+  const handleMoveField = (index: number, deltaXPct: number, deltaYPct: number) => {
+    const updated = [...fields];
+    const field = updated[index];
+    updated[index] = {
+      ...field,
+      x: Math.max(0, Math.min(100 - field.width, field.x + deltaXPct)),
+      y: Math.max(0, Math.min(100 - field.height, field.y + deltaYPct)),
+    };
+    setFields(updated);
   };
 
   const handleSave = async () => {
@@ -250,7 +276,7 @@ export default function SigningEditorPage() {
     try {
       await api.put(`/signing/${id}/fields`, { fields });
       await api.post(`/signing/${id}/send`);
-      alert('签署请求已发送！请查看控制台获取签署链接。');
+      alert('签署请求已发送！签署邮件已发送至签署人邮箱。');
       navigate('/documents');
     } catch (err: any) {
       alert(err.response?.data?.error || '发送失败');
@@ -264,7 +290,7 @@ export default function SigningEditorPage() {
   const pdfUrl = `/api/documents/${process.document_id}/file`;
 
   return (
-    <DndContext onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       <div className="flex gap-6 h-[calc(100vh-120px)]">
         {/* Left sidebar */}
         <div className="w-64 flex-shrink-0 bg-white border rounded-lg p-4 overflow-y-auto">
@@ -316,13 +342,14 @@ export default function SigningEditorPage() {
         </div>
 
         {/* PDF area */}
-        <div className="flex-1 overflow-auto flex justify-center" ref={canvasRef}>
+        <div className="flex-1 overflow-auto flex justify-center">
           <PDFViewer
             url={pdfUrl}
             currentPage={currentPage}
             onPageChange={setCurrentPage}
             onLoadSuccess={setNumPages}
             width={600}
+            overlayRef={overlayRef}
             renderOverlay={(pageWidth, pageHeight) => (
               <DroppableCanvas
                 fields={fields}
@@ -331,6 +358,8 @@ export default function SigningEditorPage() {
                 pageHeight={pageHeight}
                 signers={signers}
                 onDeleteField={handleDeleteField}
+                onMoveField={handleMoveField}
+                overlayRect={overlayRef.current?.getBoundingClientRect() || null}
               />
             )}
           />
