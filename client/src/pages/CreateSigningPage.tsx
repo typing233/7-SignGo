@@ -15,6 +15,7 @@ export default function CreateSigningPage() {
   const docId = searchParams.get('docId');
   const [doc, setDoc] = useState<any>(null);
   const [title, setTitle] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
   const [signers, setSigners] = useState<SignerInput[]>([{ name: '', email: '', sign_order: 1 }]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -60,6 +61,7 @@ export default function CreateSigningPage() {
         document_id: Number(docId),
         title,
         signers,
+        expires_at: expiresAt || undefined,
       });
       navigate(`/signing/${res.data.process.id}/edit`);
     } catch (err: any) {
@@ -91,6 +93,17 @@ export default function CreateSigningPage() {
             className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
             required
           />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">签署截止日期（可选）</label>
+          <input
+            type="datetime-local"
+            value={expiresAt}
+            onChange={(e) => setExpiresAt(e.target.value)}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <p className="text-xs text-gray-400 mt-1">超过截止日期后，签署链接将自动失效</p>
         </div>
 
         <div>

@@ -8,6 +8,7 @@ import DocumentDetailPage from './pages/DocumentDetailPage';
 import CreateSigningPage from './pages/CreateSigningPage';
 import SigningEditorPage from './pages/SigningEditorPage';
 import SignPage from './pages/SignPage';
+import DashboardPage from './pages/DashboardPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -23,7 +24,8 @@ function AppRoutes() {
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/sign/:token" element={<SignPage />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-        <Route index element={<Navigate to="/documents" />} />
+        <Route index element={<Navigate to="/dashboard" />} />
+        <Route path="dashboard" element={<DashboardPage />} />
         <Route path="documents" element={<DocumentListPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="signing/new" element={<CreateSigningPage />} />

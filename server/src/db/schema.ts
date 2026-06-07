@@ -33,6 +33,8 @@ export async function initializeSchema() {
       creator_id INTEGER NOT NULL REFERENCES users(id),
       title TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'draft',
+      expires_at TEXT,
+      final_document_path TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
@@ -47,7 +49,9 @@ export async function initializeSchema() {
       sign_order INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
       token TEXT NOT NULL UNIQUE,
-      signed_at TEXT
+      signed_at TEXT,
+      rejected_at TEXT,
+      reject_reason TEXT
     )
   `);
 
@@ -64,6 +68,32 @@ export async function initializeSchema() {
       height REAL NOT NULL,
       value TEXT,
       required INTEGER NOT NULL DEFAULT 1
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      signing_process_id INTEGER NOT NULL REFERENCES signing_processes(id),
+      signer_id INTEGER REFERENCES signers(id),
+      user_id INTEGER REFERENCES users(id),
+      action TEXT NOT NULL,
+      details TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS webhook_configs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      url TEXT NOT NULL,
+      events TEXT NOT NULL,
+      secret TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
 
